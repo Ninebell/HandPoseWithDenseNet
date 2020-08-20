@@ -1,46 +1,130 @@
 import torch
 import torch.nn as nn
 from torch_module.utils import get_param_count
-from torch_module.layers import Conv2D, DenseBlock, BottleNeckBlock
+from torch_module.layers import Conv2D, DenseBlock, BottleNeckBlock, UpConv2D
 
 
-class NDenseNet(nn.Module):
-    def __init__(self, growth_k=32):
-        super(NDenseNet, self).__init__()
+class DenseUNetFilter(nn.Module):
+    def __init__(self, growth_k=16, activation='relu', using_up=False, using_down=False):
+        super(DenseUNetFilter, self).__init__()
         self.growth_k = growth_k
-        self.dense_count = [6, 12, 24, 16]
+        self.dense_count = [4, 6, 12]
+        self.activation = activation
+        self.using_down = using_down
+        self.using_up = using_up
+
         self.__build__()
 
     def __build__(self):
-        self.conv = Conv2D(3, self.growth_k*2, 7, 2, 3, 'relu', True)
+        self.conv = Conv2D(3, self.growth_k*2, 7, 2, 3, self.activation, True)
+        self.conv3 = Conv2D(self.growth_k*2, self.growth_k*2, 3, 1, 1, activation=self.activation, batch=True)
         self.max_pool = nn.MaxPool2d(3, stride=2, padding=1)
-        self.dense_seq = nn.Sequential()
-        self.transition_seq = nn.Sequential()
+        self.down_dense_list = nn.ModuleList()
+        self.base_connection = nn.ModuleList()
+        self.down_pool_list = nn.ModuleList()
         input_ch = self.growth_k*2
-        for j in range(4):
-            dense_block = DenseBlock(input_ch, self.growth_k, self.dense_count[j])
-            self.dense_seq.add_module(name='dense_{0}'.format(j+1), module=dense_block)
-            output_ch = self.calc_k_output(input_ch, self.dense_count[j])
 
-            if j != 3:
-                transition_layer = nn.Sequential(
-                    Conv2D(output_ch, output_ch//2, 1, 1, 0, 'relu', True),
+        for j in range(len(self.dense_count)):
+            dense_block = DenseBlock(input_ch, self.growth_k, self.dense_count[j])
+            self.down_dense_list.append(dense_block)
+
+            output_ch = dense_block.out_ch
+
+            if j != len(self.dense_count)-1:
+                down_pool_layer = nn.Sequential(
+                    Conv2D(output_ch, output_ch, 1, 1, 0, self.activation,True),
                     nn.AvgPool2d(2, stride=2, padding=0)
                 )
-                self.transition_seq.add_module(name='tran_{0}'.format(j+1), module=transition_layer)
-            input_ch = output_ch//2
+                self.down_pool_list.append(down_pool_layer)
+            input_ch = output_ch
 
-        self.conv3 = Conv2D(output_ch, output_ch//2, 3, stride=2, padding=1, activation='relu')
+            base_connect = BottleNeckBlock(dense_block.out_ch, True, activation=self.activation)
 
-        self.conv_3_1 = BottleNeckBlock(output_ch//2, output_ch//2)
+            self.base_connection.append(base_connect)
 
-        self.conv_3_2 = Conv2D(output_ch//2, output_ch//4, kernel_size=(3,4), stride=1,padding=0,activation='tanh')
-        self.dense_3 = nn.Linear(output_ch//4, 63)
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.max_pool(self.conv3(x))
 
-        self.conv_2_1 = BottleNeckBlock(output_ch//2, output_ch//2)
+        # down sampling
+        for j in range(len(self.dense_count)):
+            print(x.shape)
+            x = self.down_dense_list[j](x)
+            if j != len(self.dense_count)-1:
+                x = self.down_pool_list[j](x)
 
-        self.conv_2_2 = Conv2D(output_ch//2, output_ch//4, kernel_size=(3,4), stride=1,padding=0,activation='tanh')
-        self.dense_2 = nn.Linear(output_ch//4, 42)
+        return x
+
+
+class DenseUNet(nn.Module):
+    def __init__(self, growth_k=16, activation='relu', using_up=False, using_down=False):
+        super(DenseUNet, self).__init__()
+        self.growth_k = growth_k
+        self.dense_count = [4, 4, 8]
+        self.activation = activation
+
+        self.__build__()
+
+    def __build__(self):
+        self.conv = Conv2D(3, self.growth_k*2, 7, 2, 3, self.activation, True)
+        self.max_pool = nn.MaxPool2d(3, stride=2, padding=1)
+        self.down_dense_list = nn.ModuleList()
+        self.down_pool_list = nn.ModuleList()
+        input_ch = self.growth_k*2
+        depth_ch = []
+        for j in range(len(self.dense_count)):
+            dense_block = DenseBlock(input_ch, self.growth_k, self.dense_count[j])
+            self.down_dense_list.append(dense_block)
+            output_ch = self.calc_k_output(input_ch, self.dense_count[j])
+            depth_ch.append(output_ch)
+
+            if j != len(self.dense_count)-1:
+                down_pool_layer = nn.Sequential(
+                    Conv2D(output_ch, output_ch, 1, 1, 0, self.activation,True),
+                    nn.AvgPool2d(2, stride=2, padding=0)
+                )
+                self.down_pool_list.append(down_pool_layer)
+            input_ch = output_ch
+
+        self.middle_bottle_list = nn.ModuleList()
+        for j in range(len(self.dense_count)):
+            self.middle_bottle_list.append(BottleNeckBlock(depth_ch[j], attention=True, activation=self.activation))
+
+        self.middle_expand_list = nn.ModuleList()
+        for depth_idx in range(1, len(self.dense_count)):
+            up_module = nn.ModuleList()
+            for up_idx in range(depth_idx):
+                up_seq = nn.Sequential()
+                for u in range(up_idx+1):
+                    up_conv = UpConv2D(2, depth_ch[depth_idx], depth_ch[depth_idx], 3, 1, 1, self.activation, True)
+                    up_seq.add_module(name='skip_up_connection_{0}_{1}'.format(up_idx, u), module=up_conv)
+                up_seq.add_module(name='skip_conv_1_{0}'.format(up_idx),
+                                  module=Conv2D(depth_ch[depth_idx], depth_ch[depth_idx-(up_idx+1)],
+                                                1, 1, 0, self.activation, True))
+                up_module.append(up_seq)
+
+            self.middle_expand_list.append(up_module)
+
+        self.up_dense_list = nn.ModuleList()
+        self.up_pool_list = nn.ModuleList()
+
+        for j in range(len(self.dense_count)):
+            dense_block = DenseBlock(depth_ch[j], self.growth_k, self.dense_count[j])
+            self.up_dense_list.append(dense_block)
+
+            if j != 0:
+                self.up_pool_list.append(UpConv2D(2, self.calc_k_output(depth_ch[j], self.dense_count[j]), depth_ch[j-1], 1, 1, 0, activation=self.activation, batch=True))
+
+        last_ch = self.calc_k_output(depth_ch[0], self.dense_count[0])
+        self.joint_2d_b = BottleNeckBlock(last_ch, attention=True, activation=self.activation)
+        self.joint_2d = Conv2D(last_ch, 21, 1, 1, 0, 'sigmoid')
+
+        self.joint_3d_b = BottleNeckBlock(last_ch, attention=True, activation=self.activation)
+        self.joint_3d_l = nn.Sequential(
+            nn.Linear(last_ch, 128),
+            nn.BatchNorm1d(128)
+        )
+        self.joint_3d = nn.Linear(128, 60)
 
     def calc_k_output(self, input_ch, k):
         return input_ch + k * self.growth_k
@@ -50,48 +134,70 @@ class NDenseNet(nn.Module):
         # Dense Feature region
         x = self.conv(x)
         x = self.max_pool(x)
-        for i in range(4):
-            x = self.dense_seq[i](x)
-            if i != 3:
-                x = self.transition_seq[i](x)
-        x = self.conv3(x)
 
-        hand_3 = self.conv_3_1(x)
-        hand_3 = self.conv_3_2(hand_3)
-        hand_3 = hand_3.view((hand_3.shape[0], -1))
-        hand_3 = self.dense_3(hand_3)
-        hand_3 = hand_3.view((hand_3.shape[0], 21, 3))
+        middle_output = []
 
-        hand_2 = self.conv_2_1(x)
-        hand_2 = self.conv_2_2(hand_2)
-        hand_2 = hand_2.view((hand_2.shape[0], -1))
-        hand_2 = self.dense_2(hand_2)
-        hand_2 = hand_2.view((hand_2.shape[0], 21, 2))
+        for i in range(len(self.dense_count)):
+            x = self.down_dense_list[i](x)
+            middle_output.append(x)
+            if i != len(self.dense_count)-1:
+                x = self.down_pool_list[i](x)
 
-        return hand_2, hand_3
+        for i in range(len(self.dense_count)):
+            next_out = middle_output[i]
+            for k in range(i, len(self.middle_expand_list)):
+                up_list = self.middle_expand_list[k]
+                up_seq = up_list[-(i+1)]
+                up_seq_result = up_seq(middle_output[k+1])
+                next_out = next_out + up_seq_result
+            middle_output[i] = next_out
+
+        for i in range(len(self.dense_count)):
+            middle_output[i] = self.middle_bottle_list[i](middle_output[i])
+
+        for i in range(len(self.dense_count)-1, -1, -1):
+            if i == len(self.dense_count)-1:
+                up_dense = self.up_dense_list[i](middle_output[i])
+                up_pool = self.up_pool_list[i-1](up_dense)
+            elif i != 0:
+                up_dense = self.up_dense_list[i](up_pool+middle_output[i])
+                up_pool = self.up_pool_list[i-1](up_dense)
+            else:
+                up_dense = self.up_dense_list[i](up_pool+middle_output[i])
+
+        joint_2d = self.joint_2d_b(up_dense)
+        joint_2d = self.joint_2d(joint_2d)
+
+        joint_3d = self.joint_3d_b(up_dense)
+        joint_3d = torch.mean(joint_3d, dim=[2, 3])
+        joint_3d = joint_3d.view((joint_3d.shape[0], -1))
+        joint_3d = torch.relu(self.joint_3d_l(joint_3d))
+        joint_3d = torch.tanh(self.joint_3d(joint_3d))
+
+        return joint_2d, joint_3d
 
 
 if __name__ == "__main__":
-    net = NDenseNet()
-    print(get_param_count(net))
-    t = torch.rand((1, 3, 192, 256))
+    net = DenseUNetFilter()
+    print('{:,}'.format(get_param_count(net)))
+    t = torch.rand((64, 3, 192, 256))
     o = torch.rand((1,21,64,64))
 
     result = net(t)
-    print(result.shape)
 
     optim = torch.optim.Adam(net.parameters(),lr=1e-4)
     criterion = torch.nn.MSELoss()
 
-    for i in range(100):
-        optim.zero_grad()
-        result = net(t)
-        print(torch.mean(torch.abs(result-o)))
-        loss = criterion(o, result)
-        loss.backward()
-        optim.step()
-        # for p in net.parameters():
-        #     print(p)
-        #     break
-    print(result.shape)
+    # for i in range(100):
+    #     optim.zero_grad()
+    #     result = net(t)
+    #     print(torch.mean(torch.abs(result-o)))
+    #     loss = criterion(o, result)
+    #     loss.backward()
+    #     optim.step()
+    #     # for p in net.parameters():
+    #     #     print(p)
+    #     #     break
+    print(result[0].shape)
+    print(result[1].shape)
 

@@ -6,6 +6,7 @@ import random
 from train import *
 import matplotlib.pyplot as plt
 from pathlib import Path
+from torchvision.utils import save_image
 
 root_path = 'D:\\dataset\\multiview_hand_pose_dataset_uploaded_v2'
 proj_2d_path = root_path+'\\projections_2d'
@@ -23,12 +24,14 @@ def heat_map_create(conf):
 
     all_len = len(file_list)
     for iter in range(all_len):
-        joint2 = joint_scale(os.path.join(proj_2d_path,file_list[iter][1]), np.asarray([640,480]))
+        joint2 = joint_scale(os.path.join(proj_2d_path,file_list[iter][1]), np.asarray([480,640]))
         joint2 = np.asarray([joint_2_heat_map(joint, (48, 64)) for joint in joint2])
 
         for idx, heat_map in enumerate(joint2):
-            if conf['is_train']:
+            if conf['is_train'] == 0:
                 path = '{0}\\{1}'.format('D:\\dataset\\multiview_hand_pose_dataset_uploaded_v2\\train\\heat_map', idx)
+            elif conf['is_train'] == 1:
+                path = '{0}\\{1}'.format('D:\\dataset\\multiview_hand_pose_dataset_uploaded_v2\\validate\\heat_map', idx)
             else:
                 path = '{0}\\{1}'.format('D:\\dataset\\multiview_hand_pose_dataset_uploaded_v2\\test\\heat_map', idx)
 
@@ -36,10 +39,8 @@ def heat_map_create(conf):
             path = os.path.join(path, '{0}.png'.format(file_list[iter][1].split('.')[0]))
             save_image(heat_map, path)
 
-        print(file_list[iter][1])
 
-
-def get_fool_path(root_path):
+def get_full_path(root_path):
     file_path = []
     path_dir = os.listdir(root_path)
     for d_p in path_dir:
@@ -64,8 +65,8 @@ def file_save(save_path, img_path, index, beg, end):
     fp.close()
 
 
-if __name__ == "__main__2":
-    img_file_path = get_fool_path(img_path)
+def create_data_pair():
+    img_file_path = get_full_path(img_path)
     sorted(img_file_path)
 
     print(len(img_file_path))
@@ -90,7 +91,8 @@ if __name__ == "__main__2":
     end = beg + test_len
     file_save('test_file_pair.csv', img_file_path, idx, beg, end)
 
-if __name__ == "__main__2":
+
+def create_heat_map():
     train_file_list = file_list_load('train_file_pair.csv')
     validate_file_list = file_list_load('validate_file_pair.csv')
     test_file_list = file_list_load('test_file_pair.csv')
@@ -121,18 +123,20 @@ if __name__ == "__main__2":
             test_heat_map_path = os.path.join(test_root_folder, 'heat_map') + '\\{0}\\data_{1}'.format(j, i)
             os.makedirs(test_heat_map_path, exist_ok=True)
 
-    # heat_map_create({
-    #     'list': train_file_list,
-    #     'is_train': True
-    # })
-    # heat_map_create({
-    #     'list': validate_file_list, #     'is_train': False
-    # })
+    heat_map_create({
+        'list': train_file_list,
+        'is_train': 0
+    })
+    heat_map_create({
+        'list': validate_file_list,
+        'is_train': 1
+    })
 
     heat_map_create({
         'list': test_file_list,
-        'is_train': False
+        'is_train': 2
     })
+
 
 if __name__ == "__main__1":
     with h5py.File('train_data.h5', 'r') as hf:
@@ -187,7 +191,7 @@ def h5py_table_create(name, generator, conf):
             )
 
 
-if __name__ == "__main__2":
+def create_h5py():
 
     train_file_list = file_list_load('train_file_pair.csv')
     validate_file_list = file_list_load('validate_file_pair.csv')
@@ -212,12 +216,26 @@ if __name__ == "__main__2":
         'batch': batch_size,
         'list': test_file_list})
 
-if __name__ == "__main__":
+
+if __name__ == "__main___":
 
     hf = h5py.File('train_data.hdf5', 'r')
 
     for x, y in data_load_from_hdf5({'hdf5': hf, 'batch_size': 32, 'is_train': True}):
         print(x.shape)
         print(y[0].shape, y[1].shape)
+
+if __name__ == "__main__":
+    make_pair = 0
+    make_heat_map = 1
+    make_h5 = 2
+
+    data_make_type = make_h5
+    if data_make_type == make_pair:
+        create_data_pair()
+    elif data_make_type == make_heat_map:
+        create_heat_map()
+    elif data_make_type == make_h5:
+        create_h5py()
 
 
