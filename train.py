@@ -183,7 +183,7 @@ def file_list_load(path):
     return file_list
 
 
-def PCK_2D(target, predict, t, x):
+def PCK_2D(target, predict, t=0, x=0):
     with torch.no_grad():
         t_np = target[0].cpu().numpy()
         p_np = predict[0].cpu().numpy()
@@ -200,7 +200,7 @@ def PCK_2D(target, predict, t, x):
     return dist
 
 
-def PCK_3D(target, predict, t, x):
+def PCK_3D(target, predict, t=0, x=0):
     with torch.no_grad():
         joint_3_p = predict[1][0].cpu().detach().numpy()
         joint_3_p = np.reshape(joint_3_p, (20, 3))
@@ -346,22 +346,22 @@ def test_model(net, pretrain_path, data_loader):
     if torch.cuda.is_available():
         net.cuda()
 
-    net.load_state_dict(torch.load(pretrain_path))
+    # net.load_state_dict(torch.load(pretrain_path))
     net.eval()
 
     for iter, (x, y) in enumerate(data_loader['loader'](data_loader['conf'])):
         print(x.shape)
         result = net(x)
 
-        PCK_2D(y, result)
-        PCK_3D(y, result)
+        print(PCK_2D(y, result))
+        print(PCK_3D(y, result))
 
         del result
 
 
 if __name__ == "__main__":
 
-    net = DenseUNetFilter(using_down=True, using_up=False)
+    net = DenseUNetFilter(using_up=False, using_down=False)
 
     optim = torch.optim.Adam(net.parameters(), lr=1e-3)
 
@@ -374,7 +374,8 @@ if __name__ == "__main__":
 
     save_path = 'result'
     os.makedirs(save_path, exist_ok=True)
-
+    state = 'base'
+    # net.load_state_dict(torch.load("{0}\\{1}\\{1}.dict".format(save_path, state)))
     criterion = custom_loss
 
     train_hf = h5py.File('train_data.hdf5', 'r')
