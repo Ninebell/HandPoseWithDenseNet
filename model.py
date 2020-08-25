@@ -140,7 +140,6 @@ class DenseUNetFilter(nn.Module):
                 up_count = up_count-1
             x = self.up_dense_list[j](connect)
 
-        print(down_count, up_count, len(down_connect))
 
         joint_2d = self.joint_2d_b(x)
         joint_2d = self.joint_2d(joint_2d)

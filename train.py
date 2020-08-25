@@ -14,12 +14,12 @@ import matplotlib.pyplot as plt
 from torch_module.utils import train_model
 import numpy as np
 from PIL import Image
-from model import DenseUNet
+from model import DenseUNet, DenseUNetFilter
 
 import h5py
 
-root_path = 'C:\\Users\\rnwhd\\Desktop\\git\\HandPoseWithDenseNet'
-root_path = 'D:\\dataset\\multiview_hand_pose_dataset_uploaded_v2'
+root_path = 'result'
+# root_path = 'D:\\dataset\\multiview_hand_pose_dataset_uploaded_v2'
 
 
 def read_points(path):
@@ -361,18 +361,18 @@ def test_model(net, pretrain_path, data_loader):
 
 if __name__ == "__main__":
 
-    net = DenseUNet()
+    net = DenseUNetFilter(using_down=True, using_up=False)
 
     optim = torch.optim.Adam(net.parameters(), lr=1e-3)
 
     batch_size = 32
 
-    train_file_list = file_list_load('train_file_pair.csv')
-    validate_file_list = file_list_load('validate_file_pair.csv')
+    # train_file_list = file_list_load('train_file_pair.csv')
+    # validate_file_list = file_list_load('validate_file_pair.csv')
+    #
+    # print(len(train_file_list), len(train_file_list)//64)
 
-    print(len(train_file_list), len(train_file_list)//64)
-
-    save_path = 'D:\\dataset\\multiview_hand_pose_dataset_uploaded_v2\\result'
+    save_path = 'result'
     os.makedirs(save_path, exist_ok=True)
 
     criterion = custom_loss
