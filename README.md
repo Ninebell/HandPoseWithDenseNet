@@ -4,7 +4,7 @@ This repository implemented for experiment of skip-connection's power.
 
 I experimented using Dense-U-Net which consist of dense block and bottleneck block.
 
-##HandPoseWithDenseNet
+## HandPoseWithDenseNet
 
 ### Model
 
